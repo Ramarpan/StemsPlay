@@ -9,7 +9,7 @@ xcuserdata/
 
 # macOS
 .DS_Store
-
+*.zip
 # SwiftPM
 Packages/
 Package.resolved

@@ -24,7 +24,9 @@ final class StemTrack: ObservableObject, Identifiable {
     @Published var waveform: WaveformData? = nil
     @Published var isMuted: Bool = false
     @Published var isSolo: Bool = false
-
+    
+    
+    
     init(
         name: String,
         fileURL: URL,
@@ -45,8 +47,7 @@ final class StemAudioEngine {
     private let mixer = AVAudioMixerNode()
     private(set) var tracks: [StemTrack] = []
     private var startHostTime: UInt64?
-
-    
+    private var transportAnchorTime: TimeInterval = 0
     
     init() {
         engine.attach(mixer)
@@ -58,7 +59,65 @@ final class StemAudioEngine {
             print("StemAudioEngine: failed to start audio engine",error)
         }
     }
+
     
+    var currentPlaybackTime: TimeInterval {
+        guard
+            let track = tracks.first,
+            let nodeTime = track.player.lastRenderTime,
+            let playerTime = track.player.playerTime(forNodeTime: nodeTime)
+        else {
+            return transportAnchorTime
+        }
+
+        let played = Double(playerTime.sampleTime) / playerTime.sampleRate
+        return transportAnchorTime + played
+    }
+    
+    
+    var currentTime: TimeInterval {
+        guard
+            let track = tracks.first,
+            let nodeTime = track.player.lastRenderTime,
+            let playerTime = track.player.playerTime(forNodeTime: nodeTime)
+        else {
+            return transportAnchorTime
+        }
+
+        let playedSeconds =
+            Double(playerTime.sampleTime) / playerTime.sampleRate
+
+        return transportAnchorTime + playedSeconds
+    }
+    
+    func reposition(to time: TimeInterval, playImmediately: Bool) {
+        transportAnchorTime = time
+
+        let startTime = AVAudioTime(hostTime: mach_absolute_time())
+
+        for track in tracks {
+            track.player.stop()
+
+            let startFrame = AVAudioFramePosition(
+                time * track.file.processingFormat.sampleRate
+            )
+
+            let remainingFrames = track.file.length - startFrame
+            guard remainingFrames > 0 else { continue }
+
+            track.player.scheduleSegment(
+                track.file,
+                startingFrame: startFrame,
+                frameCount: AVAudioFrameCount(remainingFrames),
+                at: playImmediately ? startTime : nil
+            )
+
+            if playImmediately {
+                track.player.play(at: startTime)
+            }
+        }
+    }
+   
     func loadFolder(url:URL){
       
         // clear existing players
@@ -122,42 +181,16 @@ final class StemAudioEngine {
         
     }
     
-    func play(){
+    func play() {
         engine.prepare()
-        let startTime = AVAudioTime(hostTime: mach_absolute_time())
-        
-        
-        for track in tracks {
-            track.player.play(at:startTime)
-        }
-        print("Playback started")
-    }
-    
-    func seek(to time: TimeInterval) {
-
-        for track in tracks {
-            track.player.stop()
-
-            let sampleRate = track.file.processingFormat.sampleRate
-            let startFrame = AVAudioFramePosition(time * sampleRate)
-            let remainingFrames =
-                track.file.length - startFrame
-
-            guard remainingFrames > 0 else { continue }
-
-            track.player.scheduleSegment(
-                track.file,
-                startingFrame: startFrame,
-                frameCount: AVAudioFrameCount(remainingFrames),
-                at: nil
-            )
-        }
-
         let startTime = AVAudioTime(hostTime: mach_absolute_time())
         for track in tracks {
             track.player.play(at: startTime)
         }
     }
+
+    
+    
     
     func pause(){
         for track in tracks {
@@ -170,7 +203,6 @@ final class StemAudioEngine {
         for track in tracks {
             track.player.stop()
         }
-        print("Playback stopped")
     }
 
 
@@ -185,15 +217,7 @@ final class StemAudioEngine {
             .max() ?? 0
     }
 
-    var currentTime: TimeInterval {
-        guard
-            let track = tracks.first,
-            let nodeTime = track.player.lastRenderTime,
-            let playerTime = track.player.playerTime(forNodeTime: nodeTime)
-        else { return 0 }
 
-        return Double(playerTime.sampleTime) / playerTime.sampleRate
-    }
 
 
     
@@ -227,4 +251,6 @@ final class StemAudioEngine {
             }
         }
     }
+    
+
 }
